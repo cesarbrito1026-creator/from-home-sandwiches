@@ -65,8 +65,9 @@ function within(){return all.filter(function(r){return String(r.date||'').slice(
 function loadReports(){try{var x=JSON.parse(localStorage.getItem('fromHomeCustomReportsV1')||'[]');return Array.isArray(x)?x:[]}catch(e){return []}}
 function persistReports(){try{localStorage.setItem('fromHomeCustomReportsV1',JSON.stringify(savedReports))}catch(e){toast('No se pudieron guardar los informes personalizados.')}} 
 function selectedReport(){return savedReports.find(function(x){return x.id===activeReportId})||null}
-function reportContext(){var saved=selectedReport(),first=month+'-01',last=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);
-return saved?{title:saved.title,from:saved.from,to:saved.to,rows:selectedReportRows(saved)}:{title:'Informe mensual de '+monthLabel(month),from:first,to:last,rows:within()}}
+function monthlyReportContext(){var first=month+'-01',last=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);return {title:'Informe mensual de '+monthLabel(month),from:first,to:last,rows:all.filter(function(r){return (r.date||'').slice(0,7)===month}),type:'mensual'}}
+function savedReportContext(r){return {title:r.title,from:r.from,to:r.to,rows:selectedReportRows(r),type:'personalizado'}}
+function reportContext(){var saved=selectedReport();return saved?savedReportContext(saved):monthlyReportContext()}
 
 function selectedReportRows(r){
 if(!r)return [];
@@ -118,10 +119,11 @@ return '<section class="panel mt"><h2>Crear informe personalizado</h2><p class="
 '<div class="flex"><button class="mini" id="fillToday">Hoy</button><button class="mini" id="fillWeekend">Fin de semana</button><button class="mini" id="fillMonth">Mes</button></div>'+
 '<details class="pick-panel"><summary>Seleccionar facturas existentes ('+all.length+')</summary><p class="small muted">Marca las que quieras añadir, aunque pertenezcan a otro mes. No se duplicarán los gastos.</p>'+invoiceChoices([],'new-report-invoice')+'</details>'+
 '<div class="flex"><button class="btn" id="saveReport">Crear informe</button><button class="btn secondary" id="createReportAndReceipt">Crear informe + factura nueva</button></div>'+
+'<div class="notice" style="margin-top:16px;background:#fff7f1"><h3>Descargar informe del mes completo</h3><p class="small muted">Incluye todas las facturas guardadas durante el mes seleccionado, sin importar a qué informes personalizados pertenezcan.</p><div class="flex"><div><label for="month">Seleccionar mes</label><input class="monthpicker" id="month" type="month" value="'+esc(month)+'"></div><button class="btn" type="button" id="monthlyPdf">Descargar PDF mensual</button></div></div>'+
 '<h3 style="margin-top:20px">Informes guardados</h3>'+
-(savedReports.length?savedReports.slice().reverse().map(function(x){var count=selectedReportRows(x).length;return '<div class="rowReceipt"><div><strong>'+esc(x.title)+'</strong><div class="small muted">'+fmtDate(x.from)+' al '+fmtDate(x.to)+' · '+count+' facturas</div></div><div class="flex"><button class="mini" data-report-open="'+esc(x.id)+'">Ver</button><button class="mini" data-report-remove="'+esc(x.id)+'">Eliminar</button></div></div>'}).join(''):'<p class="muted small">Sin informes personalizados todavía.</p>')+'</section>'+
+(savedReports.length?savedReports.slice().reverse().map(function(x){var count=selectedReportRows(x).length;return '<div class="rowReceipt"><div><strong>'+esc(x.title)+'</strong><div class="small muted">'+fmtDate(x.from)+' al '+fmtDate(x.to)+' · '+count+' facturas</div></div><div class="flex"><button class="mini" data-report-open="'+esc(x.id)+'">Ver</button><button class="mini" data-report-pdf="'+esc(x.id)+'">Descargar PDF</button><button class="mini" data-report-remove="'+esc(x.id)+'">Eliminar</button></div></div>'}).join(''):'<p class="muted small">Sin informes personalizados todavía.</p>')+'</section>'+
 '<section id="reportContents" class="panel mt"><div class="flex between"><div><h2>'+esc(ctx.title)+'</h2><div class="muted small">Período indicado: '+fmtDate(ctx.from)+' al '+fmtDate(ctx.to)+'</div></div>'+
-(current?'<button class="mini" id="monthlyReport">Volver al mes</button>':'<input class="monthpicker" type="month" id="month" value="'+esc(month)+'">')+'</div>'+
+(current?'<button class="mini" id="monthlyReport">Volver al informe mensual</button>':'<span class="pill">Mes completo</span>')+'</div>'+
 '<div class="metricval mt">'+money(tot)+'</div><p class="small muted">'+rows.length+' facturas incluidas; el total se calcula solamente con las facturas del informe.</p>'+
 (current?
 '<div class="flex" style="margin-bottom:12px"><button class="btn" id="addNewToReport">+ Nueva factura para este informe</button><button class="btn secondary" id="chooseSavedForReport">Seleccionar facturas guardadas</button></div>'+
@@ -129,7 +131,7 @@ return '<section class="panel mt"><h2>Crear informe personalizado</h2><p class="
 invoiceChoices(rows.map(function(r){return r.id}),'manage-report-invoice')+
 '<div class="flex"><button class="btn" id="saveInvoiceSelection">Guardar selección</button><button class="btn secondary" id="cancelInvoiceSelection">Cancelar</button></div></div>':'')
 :'')+
-'<div class="flex"><button id="pdf" class="btn">Descargar PDF</button><button id="csv" class="btn secondary">Descargar Excel (CSV)</button></div>'+
+'<div class="flex"><button id="pdf" class="btn">'+(current?'Descargar PDF de este informe':'Descargar PDF mensual')+'</button><button id="csv" class="btn secondary">Descargar Excel (CSV)</button></div>'+
 '<h3 style="margin-top:18px">Facturas de este informe</h3><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Lugar</th><th class="money">Monto</th></tr></thead><tbody>'+
 rows.map(function(r){return '<tr><td>'+fmtDate(r.date)+'</td><td>'+esc(r.time||'—')+'</td><td>'+esc(r.store||'—')+'</td><td class="money">'+money(r.total)+'</td></tr>'}).join('')+'</tbody></table></div>'+
 (!rows.length?'<p class="small muted">Este informe aún no contiene facturas. Utiliza uno de los dos botones de arriba para añadirlas.</p>':'')+'</section>'
@@ -227,12 +229,12 @@ ctx.rows.forEach(function(r){rows.push([r.date,r.time,r.store,num(r.total).toFix
 download(new Blob(['\ufeff'+rows.map(function(row){return row.map(csvCell).join(',')}).join('\r\n')],{type:'text/csv;charset=utf-8'}),'From_Home_Gastos_'+ctx.from+'_a_'+ctx.to+'.csv');toast('Informe descargado')
 }
 
-async function exportPdf(){
+async function exportPdf(contextOverride,buttonElement){
 if(!window.jspdf){toast('El generador PDF no cargó. Puedes descargar Excel (CSV) o volver a intentarlo con internet.');return}
-var pdfButton=document.getElementById('pdf');
+var pdfButton=buttonElement||document.getElementById('pdf');var labelBefore=pdfButton&&pdfButton.textContent;
 if(pdfButton){pdfButton.disabled=true;pdfButton.textContent='Preparando PDF…'}
 try{
-var ctx=reportContext(),entries=ctx.rows.slice().sort(function(a,b){return (a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||'')});
+var ctx=contextOverride||reportContext(),entries=ctx.rows.slice().sort(function(a,b){return (a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||'')});
 var doc=new jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait',compress:true});
 var orange=[244,106,24],ink=[38,32,28],muted=[116,106,98],pale=[255,245,237],line=[233,223,216],white=[255,255,255];
 var generated=new Intl.DateTimeFormat('es-US',{day:'2-digit',month:'long',year:'numeric'}).format(new Date());
@@ -313,10 +315,12 @@ for(var n=1;n<=count;n++){doc.setPage(n);stroke(line);doc.setLineWidth(.4);doc.l
 label('FROM HOME SANDWICHES & MORE',14,285,8.5,true,ink);
 label('Documento de control interno · Generado '+generated,14,290.5,7.1,false,muted);
 doc.setFont('helvetica','normal');doc.setFontSize(8);color(muted);doc.text('Página '+n+' de '+count,195,285,{align:'right'})}
-doc.save('From_Home_Informe_'+ctx.from+'_a_'+ctx.to+'.pdf');
+var safeTitle=String(ctx.title||'Gastos').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-zA-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,40);
+var fileName=ctx.type==='mensual'?'From_Home_Informe_Mensual_'+ctx.from.slice(0,7)+'.pdf':'From_Home_Informe_'+(safeTitle||'Personalizado')+'_'+ctx.from+'_a_'+ctx.to+'.pdf';
+doc.save(fileName);
 toast('Informe profesional descargado en PDF.')
 }catch(e){console.error(e);toast('No se pudo generar el PDF. Descarga Excel (CSV) o vuelve a intentarlo.')}
-finally{var button=document.getElementById('pdf');if(button){button.disabled=false;button.textContent='Descargar PDF'}}
+finally{if(pdfButton){pdfButton.disabled=false;pdfButton.textContent=labelBefore||'Descargar PDF'}}
 }
 
 async function backup(){try{var z=[];for(var r of all){var v=Object.assign({},r);if(v.fileBlob){var b=v.fileBlob;v.fileBase64=await new Promise(function(resolve,reject){var reader=new FileReader();reader.onload=function(){resolve(reader.result)};reader.onerror=function(){reject(reader.error)};reader.readAsDataURL(b)});delete v.fileBlob}z.push(v)}download(new Blob([JSON.stringify({app:'From Home Control de Gastos',version:1,receipts:z,reports:savedReports})],{type:'application/json'}),'From_Home_Respaldo_'+today()+'.json');toast('Respaldo descargado')}catch(e){fail(e)}}
@@ -329,6 +333,8 @@ else if(id==='fillToday'){document.getElementById('reportFrom').value=today();do
 else if(id==='fillWeekend'){var dates=weekendDates();document.getElementById('reportFrom').value=dates.from;document.getElementById('reportTo').value=dates.to;document.getElementById('reportTitle').value='Gastos del fin de semana'}
 else if(id==='fillMonth'){var c=reportContext();document.getElementById('reportFrom').value=month+'-01';document.getElementById('reportTo').value=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);document.getElementById('reportTitle').value='Gastos de '+monthLabel(month)}
 else if(b.dataset.reportOpen){activeReportId=b.dataset.reportOpen;selectingReport=false;render();focusReportContents()}
+else if(b.dataset.reportPdf){var chosen=savedReports.find(function(r){return r.id===b.dataset.reportPdf});if(chosen)await exportPdf(savedReportContext(chosen),b);else toast('No se encontró el informe.')}
+else if(id==='monthlyPdf'){await exportPdf(monthlyReportContext(),b)}
 else if(id==='chooseSavedForReport'){selectingReport=true;render()}
 else if(id==='cancelInvoiceSelection'){selectingReport=false;render()}
 else if(id==='saveInvoiceSelection'){var report=selectedReport();if(report){report.receiptIds=checkedInvoices('manage-report-invoice');persistReports();selectingReport=false;render();toast('Selección guardada; el informe se actualizó.')}}
