@@ -228,17 +228,95 @@ download(new Blob(['\ufeff'+rows.map(function(row){return row.map(csvCell).join(
 }
 
 async function exportPdf(){
-if(!window.jspdf){toast('El generador PDF no cargó. Puedes descargar Excel (CSV) o volver a intentar con internet.');return}
+if(!window.jspdf){toast('El generador PDF no cargó. Puedes descargar Excel (CSV) o volver a intentarlo con internet.');return}
+var pdfButton=document.getElementById('pdf');
+if(pdfButton){pdfButton.disabled=true;pdfButton.textContent='Preparando PDF…'}
 try{
-var ctx=reportContext(),doc=new jspdf.jsPDF({unit:'mm',format:'a4'}),y=18;
-doc.setFontSize(16);doc.text('FROM HOME | CONTROL DE GASTOS',14,y);y+=11;
-doc.setFontSize(11);doc.text(String(ctx.title).slice(0,90),14,y);y+=8;
-doc.text('Del '+fmtDate(ctx.from)+' al '+fmtDate(ctx.to),14,y);y+=8;
-doc.text('Monto total: '+money(sum(ctx.rows))+'  |  Facturas: '+ctx.rows.length,14,y);y+=12;
-ctx.rows.forEach(function(r){if(y>278){doc.addPage();y=20}var line=fmtDate(r.date)+'   '+(r.time||'—')+'   '+(r.store||'—')+'   '+money(r.total),wrapped=doc.splitTextToSize(line,180);doc.setFontSize(10);doc.text(wrapped,14,y);y+=6*wrapped.length+2});
-if(!ctx.rows.length)doc.text('No se registraron gastos en este periodo.',14,y);
-doc.save('From_Home_Informe_'+ctx.from+'_a_'+ctx.to+'.pdf');toast('Informe PDF descargado')
-}catch(e){console.error(e);toast('No se pudo crear el PDF. Intenta el informe Excel (CSV).')}
+var ctx=reportContext(),entries=ctx.rows.slice().sort(function(a,b){return (a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||'')});
+var doc=new jspdf.jsPDF({unit:'mm',format:'a4',orientation:'portrait',compress:true});
+var orange=[244,106,24],ink=[38,32,28],muted=[116,106,98],pale=[255,245,237],line=[233,223,216],white=[255,255,255];
+var generated=new Intl.DateTimeFormat('es-US',{day:'2-digit',month:'long',year:'numeric'}).format(new Date());
+function fill(c){doc.setFillColor(c[0],c[1],c[2])}
+function stroke(c){doc.setDrawColor(c[0],c[1],c[2])}
+function color(c){doc.setTextColor(c[0],c[1],c[2])}
+function label(t,x,y,sz,bold,c){doc.setFont('helvetica',bold?'bold':'normal');doc.setFontSize(sz);color(c||ink);doc.text(String(t),x,y)}
+var logoData=null;
+try{
+var image=document.querySelector('.brand img');
+if(image&&image.complete&&image.naturalWidth){
+var canvas=document.createElement('canvas');canvas.width=660;canvas.height=440;
+var context=canvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,660,440);
+var ratio=Math.min(660/image.naturalWidth,440/image.naturalHeight),w=image.naturalWidth*ratio,h=image.naturalHeight*ratio;
+context.drawImage(image,(660-w)/2,(440-h)/2,w,h);
+logoData=canvas.toDataURL('image/jpeg',0.93)
+}
+}catch(e){console.warn('PDF: logo no disponible; usando encabezado con nombre de marca',e)}
+function drawBrandHeader(continuation){
+fill(orange);doc.rect(0,0,210,6,'F');
+if(logoData){doc.addImage(logoData,'JPEG',14,12,42,31)}
+else{fill(pale);doc.roundedRect(14,13,42,29,4,4,'F');label('FROM HOME',18,30,12,true,orange)}
+label('FROM HOME',62,23,15,true,ink);
+label('SANDWICHES & MORE',62,30,8.8,true,orange);
+label('CONTROL DE GASTOS',62,39,10,false,muted);
+stroke(line);doc.setLineWidth(.4);doc.line(14,49,196,49);
+if(continuation){label('DETALLE DE FACTURAS - CONTINUACIÓN',14,60,10,true,ink)}
+}
+function drawTableHeader(y){
+fill(ink);doc.roundedRect(14,y,182,11,2,2,'F');
+label('FECHA',18,y+7.2,8,true,white);
+label('HORA',53,y+7.2,8,true,white);
+label('LUGAR DE COMPRA',80,y+7.2,8,true,white);
+doc.setFont('helvetica','bold');doc.setFontSize(8);color(white);doc.text('MONTO',191,y+7.2,{align:'right'});
+return y+11
+}
+function receiptRows(startY){
+var y=startY;
+entries.forEach(function(r,index){
+var name=String(r.store||'No especificado').replace(/[\n\r\t]+/g,' ').trim();
+var chunks=doc.splitTextToSize(name,85).slice(0,3);
+var height=Math.max(12,chunks.length*4.5+5);
+if(y+height>268){doc.addPage();drawBrandHeader(true);y=drawTableHeader(68)}
+if(index%2===0){fill([252,248,245]);doc.rect(14,y,182,height,'F')}
+stroke(line);doc.setLineWidth(.2);doc.line(14,y+height,196,y+height);
+label(fmtDate(r.date)||'Sin fecha',18,y+7.2,9,false,ink);
+label(r.time||'—',53,y+7.2,9,false,muted);
+doc.setFont('helvetica','normal');doc.setFontSize(9);color(ink);doc.text(chunks,80,y+7);
+doc.setFont('helvetica','bold');doc.setFontSize(9.4);color(ink);doc.text(money(r.total),191,y+7.2,{align:'right'});
+y+=height
+});
+return y
+}
+drawBrandHeader(false);
+fill(pale);doc.roundedRect(14,58,182,37,3,3,'F');
+fill(orange);doc.roundedRect(14,58,3,37,1.2,1.2,'F');
+label('INFORME DE GASTOS',22,69,9,true,orange);
+var titleLines=doc.splitTextToSize(String(ctx.title||'Reporte de gastos'),158).slice(0,2);
+doc.setFont('helvetica','bold');doc.setFontSize(13);color(ink);doc.text(titleLines,22,77);
+label('Período: '+fmtDate(ctx.from)+' al '+fmtDate(ctx.to),22,90,8.8,false,muted);
+fill(pale);doc.roundedRect(14,105,88,31,3,3,'F');
+fill([255,255,255]);stroke(line);doc.roundedRect(108,105,88,31,3,3,'FD');
+label('TOTAL GASTADO',21,115,8.4,true,muted);
+label(money(sum(entries)),21,128,16,true,orange);
+label('FACTURAS INCLUIDAS',115,115,8.4,true,muted);
+label(entries.length.toString(),115,128,16,true,ink);
+label('Fecha de emisión: '+generated,14,146,8.5,false,muted);
+label('DETALLE DE COMPRAS',14,156,10.5,true,ink);
+var rowY=drawTableHeader(162);
+if(entries.length){rowY=receiptRows(rowY)}
+else{label('Todavía no hay facturas agregadas a este informe.',18,rowY+13,9,false,muted);rowY+=21}
+if(rowY+14>269){doc.addPage();drawBrandHeader(true);rowY=68}
+fill(pale);doc.roundedRect(14,rowY+3,182,12,2,2,'F');
+label('TOTAL DEL INFORME',19,rowY+10.9,9,true,ink);
+doc.setFont('helvetica','bold');doc.setFontSize(11);color(orange);doc.text(money(sum(entries)),191,rowY+11,{align:'right'});
+var count=doc.getNumberOfPages();
+for(var n=1;n<=count;n++){doc.setPage(n);stroke(line);doc.setLineWidth(.4);doc.line(14,278,196,278);
+label('FROM HOME SANDWICHES & MORE',14,285,8.5,true,ink);
+label('Documento de control interno · Generado '+generated,14,290.5,7.1,false,muted);
+doc.setFont('helvetica','normal');doc.setFontSize(8);color(muted);doc.text('Página '+n+' de '+count,195,285,{align:'right'})}
+doc.save('From_Home_Informe_'+ctx.from+'_a_'+ctx.to+'.pdf');
+toast('Informe profesional descargado en PDF.')
+}catch(e){console.error(e);toast('No se pudo generar el PDF. Descarga Excel (CSV) o vuelve a intentarlo.')}
+finally{var button=document.getElementById('pdf');if(button){button.disabled=false;button.textContent='Descargar PDF'}}
 }
 
 async function backup(){try{var z=[];for(var r of all){var v=Object.assign({},r);if(v.fileBlob){var b=v.fileBlob;v.fileBase64=await new Promise(function(resolve,reject){var reader=new FileReader();reader.onload=function(){resolve(reader.result)};reader.onerror=function(){reject(reader.error)};reader.readAsDataURL(b)});delete v.fileBlob}z.push(v)}download(new Blob([JSON.stringify({app:'From Home Control de Gastos',version:1,receipts:z,reports:savedReports})],{type:'application/json'}),'From_Home_Respaldo_'+today()+'.json');toast('Respaldo descargado')}catch(e){fail(e)}}
