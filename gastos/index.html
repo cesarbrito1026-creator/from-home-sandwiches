@@ -21,6 +21,15 @@ label{font-size:12px;font-weight:700;color:#4d4038;display:block;margin-bottom:5
 #toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#252019;color:white;padding:11px 18px;border-radius:12px;display:none;z-index:40;max-width:90%;text-align:center}
 @media(max-width:700px){.wrap,.grid2{grid-template-columns:1fr}.brand img{width:90px;height:72px}.brand h1{font-size:17px}.amount{font-size:34px}.item-row{grid-template-columns:minmax(100px,1fr) 54px 75px 75px 32px;gap:4px}.item-row input{font-size:12px;padding:6px}.item-row label{font-size:10px}.app{padding:12px 10px 70px}.panel{padding:14px}}
 @media print{nav,.noprint{display:none!important}.app{max-width:none}.panel{break-inside:avoid}}
+
+.pick-list{max-height:240px;overflow-y:auto;border:1px solid #eee3dc;border-radius:10px;padding:7px;margin:8px 0}
+.pick-row{display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 6px;border-bottom:1px solid #eee3dc}
+.pick-row:last-child{border-bottom:0}
+.pick-row input[type=checkbox]{width:20px;min-width:20px;min-height:20px;height:20px;margin:0;accent-color:#f46b16}
+.pick-details{min-width:0;flex:1}
+.pick-details .small{display:block;color:#766c66}
+details.pick-panel{background:#fff8f1;border:1px solid #eee3dc;border-radius:12px;padding:12px;margin:13px 0}
+details.pick-panel summary{cursor:pointer;font-weight:700}
 </style>
 <script defer src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -32,7 +41,7 @@ label{font-size:12px;font-weight:700;color:#4d4038;display:block;margin-bottom:5
 <script>
 (function(){
 "use strict";
-var DB='fromHomeGastosV1',db=null,all=[],view='home',month=currentMonth(),editing=null,attachment=null,items=[],busy=false,saving=false,savedReports=loadReports(),activeReportId=null;
+var DB='fromHomeGastosV1',db=null,all=[],view='home',month=currentMonth(),editing=null,attachment=null,items=[],busy=false,saving=false,savedReports=loadReports(),activeReportId=null,pendingReportId=null,selectingReport=false;
 var categories=['Ingredientes','Envases','Bebidas','Equipos','Limpieza','Transporte','Otros'];
 var money=function(n){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(n)||0)};
 function currentMonth(){var a=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit'}).formatToParts(new Date());return a.find(function(x){return x.type==='year'}).value+'-'+a.find(function(x){return x.type==='month'}).value}
@@ -57,7 +66,34 @@ function loadReports(){try{var x=JSON.parse(localStorage.getItem('fromHomeCustom
 function persistReports(){try{localStorage.setItem('fromHomeCustomReportsV1',JSON.stringify(savedReports))}catch(e){toast('No se pudieron guardar los informes personalizados.')}} 
 function selectedReport(){return savedReports.find(function(x){return x.id===activeReportId})||null}
 function reportContext(){var saved=selectedReport(),first=month+'-01',last=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);
-return saved?{title:saved.title,from:saved.from,to:saved.to,rows:all.filter(function(x){return x.date>=saved.from&&x.date<=saved.to})}:{title:'Informe mensual de '+monthLabel(month),from:first,to:last,rows:within()}}
+return saved?{title:saved.title,from:saved.from,to:saved.to,rows:selectedReportRows(saved)}:{title:'Informe mensual de '+monthLabel(month),from:first,to:last,rows:within()}}
+
+function selectedReportRows(r){
+if(!r)return [];
+if(Array.isArray(r.receiptIds)){var selection=new Set(r.receiptIds);return all.filter(function(x){return selection.has(x.id)})}
+return all.filter(function(x){return x.date>=r.from&&x.date<=r.to})
+}
+function ensureReportSelection(r){if(!Array.isArray(r.receiptIds))r.receiptIds=selectedReportRows(r).map(function(x){return x.id})}
+function attachToReport(id,invoiceId){
+var r=savedReports.find(function(x){return x.id===id});
+if(!r)return false;
+ensureReportSelection(r);
+if(r.receiptIds.indexOf(invoiceId)===-1)r.receiptIds.push(invoiceId);
+persistReports();return true
+}
+function invoiceChoices(checkedIds,name){
+var chosen=new Set(checkedIds||[]);
+return all.length?'<div class="pick-list">'+all.map(function(r){return '<label class="pick-row"><input type="checkbox" class="'+name+'" value="'+esc(r.id)+'" '+(chosen.has(r.id)?'checked':'')+'><span class="pick-details"><strong>'+esc(r.store||'Lugar desconocido')+'</strong><span class="small">'+fmtDate(r.date)+' · '+esc(r.time||'Hora no registrada')+' · '+money(r.total)+'</span></span></label>'}).join('')+'</div>':'<div class="small muted">Todavía no hay facturas guardadas. Puedes crear una desde cero.</div>'
+}
+function checkedInvoices(cssClass){return Array.from(document.querySelectorAll('input.'+cssClass+':checked')).map(function(input){return input.value})}
+function createSavedReport(){
+var from=document.getElementById('reportFrom').value,to=document.getElementById('reportTo').value,title=document.getElementById('reportTitle').value.trim();
+if(!from||!to||from>to){toast('Selecciona fechas válidas, con el día inicial antes del final.');return null}
+if(!title)title='Gastos del '+fmtDate(from)+' al '+fmtDate(to);
+var r={id:'i'+Date.now()+Math.random().toString(36).slice(2),title:title,from:from,to:to,receiptIds:checkedInvoices('new-report-invoice')};
+savedReports.push(r);persistReports();activeReportId=r.id;selectingReport=false;return r
+}
+
 function weekendDates(){var x=new Date(today()+'T12:00:00Z'),day=x.getUTCDay(),off=day===6?-1:day===0?-2:(5-day+7)%7;x.setUTCDate(x.getUTCDate()+off);var from=x.toISOString().slice(0,10);x.setUTCDate(x.getUTCDate()+2);return {from:from,to:x.toISOString().slice(0,10)}}
 
 function sum(arr){return arr.reduce(function(n,r){return n+num(r.total)},0)}
@@ -74,17 +110,28 @@ return '<div class="rowReceipt"><div><strong>'+esc(r.store||'Lugar sin especific
 }
 function receipts(){var r=within();return actionbar()+'<section class="panel mt"><div class="flex between"><h2>Facturas · '+esc(monthLabel(month))+'</h2><span class="pill">'+r.length+' compra(s)</span></div>'+(r.length?r.map(receiptRow).join(''):'<div class="empty">No hay facturas todavía. Usa “Nueva factura” para registrar tu primera compra.</div>')+'</section>'}
 function reports(){
-var ctx=reportContext(),rows=ctx.rows,tot=sum(rows);
-return '<section class="panel mt"><h2>Crear informe personalizado</h2><p class="small muted">Pon un nombre y selecciona el día inicial y final.</p>'+
-'<div class="field"><label>Nombre del informe</label><input id="reportTitle" placeholder="Ej. Gastos del fin de semana"></div>'+
-'<div class="grid2"><div class="field"><label>Desde</label><input id="reportFrom" type="date" value="'+today()+'"></div><div class="field"><label>Hasta</label><input id="reportTo" type="date" value="'+today()+'"></div></div>'+
-'<div class="flex"><button class="mini" id="fillToday">Hoy</button><button class="mini" id="fillWeekend">Fin de semana</button><button class="mini" id="fillMonth">Mes</button><button class="btn" id="saveReport">Crear informe</button></div>'+
-'<h3 style="margin-top:20px">Informes guardados</h3>'+(savedReports.length?savedReports.slice().reverse().map(function(x){return '<div class="rowReceipt"><div><strong>'+esc(x.title)+'</strong><div class="small muted">'+fmtDate(x.from)+' al '+fmtDate(x.to)+'</div></div><div class="flex"><button class="mini" data-report-open="'+esc(x.id)+'">Ver</button><button class="mini" data-report-remove="'+esc(x.id)+'">Eliminar</button></div></div>'}).join(''):'<p class="muted small">Sin informes personalizados todavía.</p>')+'</section>'+
-'<section class="panel mt"><div class="flex between"><div><h2>'+esc(ctx.title)+'</h2><div class="muted small">Del '+fmtDate(ctx.from)+' al '+fmtDate(ctx.to)+'</div></div>'+(selectedReport()?'<button class="mini" id="monthlyReport">Volver al mes</button>':'<input class="monthpicker" type="month" id="month" value="'+esc(month)+'">')+'</div>'+
-'<div class="metricval mt">'+money(tot)+'</div><p class="small muted">'+rows.length+' facturas incluidas</p>'+
+var ctx=reportContext(),rows=ctx.rows,tot=sum(rows),current=selectedReport();
+return '<section class="panel mt"><h2>Crear informe personalizado</h2><p class="small muted">Pon un nombre, indica el período y selecciona las facturas que quieres incluir.</p>'+
+'<div class="field"><label for="reportTitle">Nombre del informe</label><input id="reportTitle" placeholder="Ej. Gastos del fin de semana"></div>'+
+'<div class="grid2"><div class="field"><label for="reportFrom">Desde</label><input id="reportFrom" type="date" value="'+today()+'"></div><div class="field"><label for="reportTo">Hasta</label><input id="reportTo" type="date" value="'+today()+'"></div></div>'+
+'<div class="flex"><button class="mini" id="fillToday">Hoy</button><button class="mini" id="fillWeekend">Fin de semana</button><button class="mini" id="fillMonth">Mes</button></div>'+
+'<details class="pick-panel"><summary>Seleccionar facturas existentes ('+all.length+')</summary><p class="small muted">Marca las que quieras añadir, aunque pertenezcan a otro mes. No se duplicarán los gastos.</p>'+invoiceChoices([],'new-report-invoice')+'</details>'+
+'<div class="flex"><button class="btn" id="saveReport">Crear informe</button><button class="btn secondary" id="createReportAndReceipt">Crear informe + factura nueva</button></div>'+
+'<h3 style="margin-top:20px">Informes guardados</h3>'+
+(savedReports.length?savedReports.slice().reverse().map(function(x){var count=selectedReportRows(x).length;return '<div class="rowReceipt"><div><strong>'+esc(x.title)+'</strong><div class="small muted">'+fmtDate(x.from)+' al '+fmtDate(x.to)+' · '+count+' facturas</div></div><div class="flex"><button class="mini" data-report-open="'+esc(x.id)+'">Ver</button><button class="mini" data-report-remove="'+esc(x.id)+'">Eliminar</button></div></div>'}).join(''):'<p class="muted small">Sin informes personalizados todavía.</p>')+'</section>'+
+'<section class="panel mt"><div class="flex between"><div><h2>'+esc(ctx.title)+'</h2><div class="muted small">Período indicado: '+fmtDate(ctx.from)+' al '+fmtDate(ctx.to)+'</div></div>'+
+(current?'<button class="mini" id="monthlyReport">Volver al mes</button>':'<input class="monthpicker" type="month" id="month" value="'+esc(month)+'">')+'</div>'+
+'<div class="metricval mt">'+money(tot)+'</div><p class="small muted">'+rows.length+' facturas incluidas; el total se calcula solamente con las facturas del informe.</p>'+
+(current?
+'<div class="flex" style="margin-bottom:12px"><button class="btn" id="addNewToReport">+ Nueva factura para este informe</button><button class="btn secondary" id="chooseSavedForReport">Seleccionar facturas guardadas</button></div>'+
+(selectingReport?'<div class="notice"><strong>Elegir facturas del informe</strong><p class="small">Marca las facturas que quieres incluir y desmarca las que deseas quitar. Las originales seguirán guardadas.</p>'+
+invoiceChoices(rows.map(function(r){return r.id}),'manage-report-invoice')+
+'<div class="flex"><button class="btn" id="saveInvoiceSelection">Guardar selección</button><button class="btn secondary" id="cancelInvoiceSelection">Cancelar</button></div></div>':'')
+:'')+
 '<div class="flex"><button id="pdf" class="btn">Descargar PDF</button><button id="csv" class="btn secondary">Descargar Excel (CSV)</button></div>'+
-'<h3 style="margin-top:18px">Detalle de gastos</h3><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Lugar</th><th class="money">Monto</th></tr></thead><tbody>'+
-rows.map(function(r){return '<tr><td>'+fmtDate(r.date)+'</td><td>'+esc(r.time||'—')+'</td><td>'+esc(r.store||'—')+'</td><td class="money">'+money(r.total)+'</td></tr>'}).join('')+'</tbody></table></div></section>'
+'<h3 style="margin-top:18px">Facturas de este informe</h3><div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Hora</th><th>Lugar</th><th class="money">Monto</th></tr></thead><tbody>'+
+rows.map(function(r){return '<tr><td>'+fmtDate(r.date)+'</td><td>'+esc(r.time||'—')+'</td><td>'+esc(r.store||'—')+'</td><td class="money">'+money(r.total)+'</td></tr>'}).join('')+'</tbody></table></div>'+
+(!rows.length?'<p class="small muted">Este informe aún no contiene facturas. Utiliza uno de los dos botones de arriba para añadirlas.</p>':'')+'</section>'
 }
 function backupPage(){return '<div class="panel mt"><h2>Respaldo y privacidad</h2><p>Las facturas y sus archivos se guardan <strong>solo en este navegador y dispositivo</strong>, no en GitHub ni en una cuenta en la nube. Si borras los datos del navegador o cambias de teléfono, puedes perderlos.</p><div class="flex"><button id="backup" class="btn">Descargar respaldo completo (JSON)</button><label style="margin:0" class="btn secondary">Restaurar respaldo <input id="restore" type="file" accept=".json,application/json" style="display:none"></label></div><p class="small muted">Guarda el respaldo en un lugar seguro, porque puede contener datos de compras y las facturas originales.</p><p class="notice small">Esta primera versión usa almacenamiento local. No compartas el dispositivo con personas que no deban ver estos datos. El acceso con contraseña y la sincronización segura entre dispositivos requieren una siguiente fase.</p></div>'}
 function editor(){
@@ -119,8 +166,8 @@ if(!data.date){toast('Selecciona el día y mes de compra.');return}
 saving=true;var button=document.getElementById('save');if(button){button.disabled=true;button.textContent='Guardando…'}
 var original=attachment||editing&&editing.fileBlob,prepared=await prepareAttachment(original);
 var record=Object.assign({},editing||{},{id:editing&&editing.id?editing.id:'r'+Date.now()+Math.random().toString(36).slice(2)},data,{fileBlob:prepared||null,fileName:original?(original.name||'Factura'):(editing&&editing.fileName||''),modifiedAt:new Date().toISOString()});
-try{await op('put',record);var confirmed=await op('getAll');if(!confirmed.some(function(x){return x.id===record.id}))throw new Error('No se pudo confirmar el guardado');attachment=null;editing=null;view='receipts';month=record.date.slice(0,7);await refresh();toast(prepared||!original?'Factura guardada correctamente.':'Datos guardados. El archivo era demasiado grande para almacenarlo.')}
-catch(e){try{record.fileBlob=null;record.fileName='';await op('put',record);var a=await op('getAll');if(!a.some(function(x){return x.id===record.id}))throw new Error('No confirmado');attachment=null;editing=null;view='receipts';month=record.date.slice(0,7);await refresh();toast('Datos guardados. No hubo espacio para conservar la imagen original.')}catch(err){console.error(e,err);toast('No se pudo guardar. Prueba desde Safari normal y verifica el espacio del dispositivo.')}}
+try{await op('put',record);var confirmed=await op('getAll');if(!confirmed.some(function(x){return x.id===record.id}))throw new Error('No se pudo confirmar el guardado');var assigned=pendingReportId&&attachToReport(pendingReportId,record.id);attachment=null;editing=null;pendingReportId=null;view=assigned?'reports':'receipts';month=record.date.slice(0,7);await refresh();toast(assigned?'Factura guardada y añadida al informe.':(prepared||!original?'Factura guardada correctamente.':'Datos guardados. El archivo era demasiado grande para almacenarlo.'))}
+catch(e){try{record.fileBlob=null;record.fileName='';await op('put',record);var a=await op('getAll');if(!a.some(function(x){return x.id===record.id}))throw new Error('No confirmado');var assigned=pendingReportId&&attachToReport(pendingReportId,record.id);attachment=null;editing=null;pendingReportId=null;view=assigned?'reports':'receipts';month=record.date.slice(0,7);await refresh();toast(assigned?'Factura añadida al informe (sin guardar la foto).':'Datos guardados. No hubo espacio para conservar la imagen original.')}catch(err){console.error(e,err);toast('No se pudo guardar. Prueba desde Safari normal y verifica el espacio del dispositivo.')}}
 finally{saving=false;var b=document.getElementById('save');if(b){b.disabled=false;b.textContent='Guardar factura'}}
 }
 
@@ -198,16 +245,20 @@ async function restore(file){if(!file)return;if(!confirm('¿Restaurar este respa
 document.getElementById('nav').addEventListener('click',function(e){var b=e.target.closest('[data-view]');if(b)setview(b.dataset.view)});
 document.getElementById('page').addEventListener('change',function(e){if(e.target.id==='month'){month=e.target.value;activeReportId=null;render()}else if(e.target.id==='restore')restore(e.target.files[0])});
 document.getElementById('page').addEventListener('click',async function(e){var t=e.target,b=t.closest('button'),id=b&&b.id;if(!b)return;
-if(id==='saveReport'){var from=document.getElementById('reportFrom').value,to=document.getElementById('reportTo').value,title=document.getElementById('reportTitle').value.trim();if(!from||!to||from>to){toast('Selecciona un período válido: la fecha inicial no puede ser posterior a la final.');return}if(!title)title='Gastos del '+fmtDate(from)+' al '+fmtDate(to);var custom={id:'i'+Date.now()+Math.random().toString(36).slice(2),title:title,from:from,to:to};savedReports.push(custom);persistReports();activeReportId=custom.id;render();toast('Informe guardado. Puedes verlo y descargarlo.')}
+if(id==='saveReport'||id==='createReportAndReceipt'){var created=createSavedReport();if(!created)return;if(id==='createReportAndReceipt'){pendingReportId=created.id;openEditor(null);toast('Informe creado. Completa la nueva factura.')}else{render();toast('Informe creado. Puedes añadir más facturas desde aquí.')}}
 else if(id==='fillToday'){document.getElementById('reportFrom').value=today();document.getElementById('reportTo').value=today();document.getElementById('reportTitle').value='Gastos de hoy'}
 else if(id==='fillWeekend'){var dates=weekendDates();document.getElementById('reportFrom').value=dates.from;document.getElementById('reportTo').value=dates.to;document.getElementById('reportTitle').value='Gastos del fin de semana'}
 else if(id==='fillMonth'){var c=reportContext();document.getElementById('reportFrom').value=month+'-01';document.getElementById('reportTo').value=new Date(Date.UTC(Number(month.slice(0,4)),Number(month.slice(5,7)),0)).toISOString().slice(0,10);document.getElementById('reportTitle').value='Gastos de '+monthLabel(month)}
-else if(b.dataset.reportOpen){activeReportId=b.dataset.reportOpen;render()}
-else if(b.dataset.reportRemove){if(confirm('¿Eliminar este informe guardado? Las facturas originales no se borrarán.')){savedReports=savedReports.filter(function(x){return x.id!==b.dataset.reportRemove});if(activeReportId===b.dataset.reportRemove)activeReportId=null;persistReports();render();toast('Informe eliminado; las facturas siguen guardadas.')}}
-else if(id==='monthlyReport'){activeReportId=null;render()}
-else if(id==='newReceipt'){openEditor(null)}
-else if(b.dataset.edit){openEditor(all.find(function(r){return r.id===b.dataset.edit}))}
-else if(id==='cancel'){attachment=null;editing=null;setview('receipts')}
+else if(b.dataset.reportOpen){activeReportId=b.dataset.reportOpen;selectingReport=false;render()}
+else if(id==='chooseSavedForReport'){selectingReport=true;render()}
+else if(id==='cancelInvoiceSelection'){selectingReport=false;render()}
+else if(id==='saveInvoiceSelection'){var report=selectedReport();if(report){report.receiptIds=checkedInvoices('manage-report-invoice');persistReports();selectingReport=false;render();toast('Selección guardada; el informe se actualizó.')}}
+else if(id==='addNewToReport'){pendingReportId=activeReportId;openEditor(null)}
+else if(b.dataset.reportRemove){if(confirm('¿Eliminar este informe guardado? Las facturas originales no se borrarán.')){savedReports=savedReports.filter(function(x){return x.id!==b.dataset.reportRemove});if(activeReportId===b.dataset.reportRemove){activeReportId=null;selectingReport=false}persistReports();render();toast('Informe eliminado; las facturas siguen guardadas.')}}
+else if(id==='monthlyReport'){activeReportId=null;selectingReport=false;render()}
+else if(id==='newReceipt'){pendingReportId=null;openEditor(null)}
+else if(b.dataset.edit){pendingReportId=null;openEditor(all.find(function(r){return r.id===b.dataset.edit}))}
+else if(id==='cancel'){attachment=null;editing=null;var fromReport=!!pendingReportId;pendingReportId=null;setview(fromReport?'reports':'receipts')}
 else if(id==='save'){await save()}
 else if(id==='scan'){await scan()}
 else if(id==='viewFile'){var f=attachment||editing&&editing.fileBlob;if(f){var u=URL.createObjectURL(f);window.open(u,'_blank');setTimeout(function(){URL.revokeObjectURL(u)},60000)}}
