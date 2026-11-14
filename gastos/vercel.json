@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "functions": {
+    "api/gateway.js": {
+      "includeFiles": "{index.html,logo.jpg}"
+    }
+  },
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/api/gateway.js"
+    }
+  ]
+}
